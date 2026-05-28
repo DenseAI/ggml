@@ -51,7 +51,28 @@ static void apply_binary_op(const ggml_compute_params * params, ggml_tensor * ds
     const ggml_tensor * src0 = dst->src[0];
     const ggml_tensor * src1 = dst->src[1];
 
-    GGML_ASSERT(ggml_can_repeat(src1, src0) && ggml_are_same_shape(src0, dst));
+    const bool can_repeat = ggml_can_repeat(src1, src0);
+    const bool dst_matches_src0 = ggml_are_same_shape(src0, dst);
+    if ((!can_repeat || !dst_matches_src0) && std::getenv("DENSECORE_DEBUG_VALIDATE_MUL")) {
+        fprintf(stderr,
+                     "[GGMLBinaryOpValidation] can_repeat=%d dst_matches_src0=%d dst_name=%s src0_name=%s "
+                     "src1_name=%s dst_ne=[%lld,%lld,%lld,%lld] src0_ne=[%lld,%lld,%lld,%lld] "
+                     "src1_ne=[%lld,%lld,%lld,%lld] dst_nb=[%lld,%lld,%lld,%lld] src0_nb=[%lld,%lld,%lld,%lld] "
+                     "src1_nb=[%lld,%lld,%lld,%lld]\n",
+                     can_repeat ? 1 : 0, dst_matches_src0 ? 1 : 0, dst->name[0] ? dst->name : "<unnamed>",
+                     src0 && src0->name[0] ? src0->name : "<unnamed>", src1 && src1->name[0] ? src1->name : "<unnamed>",
+                     (long long)dst->ne[0], (long long)dst->ne[1], (long long)dst->ne[2], (long long)dst->ne[3],
+                     src0 ? (long long)src0->ne[0] : -1LL, src0 ? (long long)src0->ne[1] : -1LL,
+                     src0 ? (long long)src0->ne[2] : -1LL, src0 ? (long long)src0->ne[3] : -1LL,
+                     src1 ? (long long)src1->ne[0] : -1LL, src1 ? (long long)src1->ne[1] : -1LL,
+                     src1 ? (long long)src1->ne[2] : -1LL, src1 ? (long long)src1->ne[3] : -1LL,
+                     (long long)dst->nb[0], (long long)dst->nb[1], (long long)dst->nb[2], (long long)dst->nb[3],
+                     src0 ? (long long)src0->nb[0] : -1LL, src0 ? (long long)src0->nb[1] : -1LL,
+                     src0 ? (long long)src0->nb[2] : -1LL, src0 ? (long long)src0->nb[3] : -1LL,
+                     src1 ? (long long)src1->nb[0] : -1LL, src1 ? (long long)src1->nb[1] : -1LL,
+                     src1 ? (long long)src1->nb[2] : -1LL, src1 ? (long long)src1->nb[3] : -1LL);
+    }
+    GGML_ASSERT(can_repeat && dst_matches_src0);
 
     GGML_TENSOR_BINARY_OP_LOCALS
 

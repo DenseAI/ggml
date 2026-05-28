@@ -2680,7 +2680,7 @@ void ggml_vec_dot_q4_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
 void ggml_vec_dot_q5_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy,  size_t by, int nrc) {
     assert(n % QK_K == 0);
-    assert(nrc == 1);
+    assert(nrc == 1 || (nrc == 2 && by == 0));
     UNUSED(nrc);
     UNUSED(bx);
     UNUSED(by);
@@ -2705,6 +2705,111 @@ void ggml_vec_dot_q5_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
     const int32x4_t mzero = vdupq_n_s32(0);
 
     ggml_int8x16x4_t q5bytes;
+
+    if (nrc == 2 && by == 0) {
+        const block_q5_K * GGML_RESTRICT x0 = x;
+        const block_q5_K * GGML_RESTRICT x1 = (const block_q5_K *) ((const uint8_t *) vx + bx);
+        const block_q8_K * GGML_RESTRICT y0 = y;
+
+        float sumf0 = 0;
+        float sumf1 = 0;
+
+        for (int i = 0; i < nb; ++i) {
+            uint32_t utmp0[4];
+            uint32_t utmp1[4];
+
+            const int16x8_t q8sums = vpaddq_s16(vld1q_s16(y0[i].bsums), vld1q_s16(y0[i].bsums + 8));
+
+            memcpy(utmp0, x0[i].scales, 12);
+            utmp0[3] = ((utmp0[2] >> 4) & kmask2) | (((utmp0[1] >> 6) & kmask3) << 4);
+            const uint32_t uaux0 = utmp0[1] & kmask1;
+            utmp0[1] = (utmp0[2] & kmask2) | (((utmp0[0] >> 6) & kmask3) << 4);
+            utmp0[2] = uaux0;
+            utmp0[0] &= kmask1;
+
+            memcpy(utmp1, x1[i].scales, 12);
+            utmp1[3] = ((utmp1[2] >> 4) & kmask2) | (((utmp1[1] >> 6) & kmask3) << 4);
+            const uint32_t uaux1 = utmp1[1] & kmask1;
+            utmp1[1] = (utmp1[2] & kmask2) | (((utmp1[0] >> 6) & kmask3) << 4);
+            utmp1[2] = uaux1;
+            utmp1[0] &= kmask1;
+
+            const uint8_t * scales0 = (const uint8_t *) utmp0;
+            const uint8_t * scales1 = (const uint8_t *) utmp1;
+
+            const uint8x8_t mins8_0 = vld1_u8((const uint8_t *) utmp0 + 8);
+            const uint8x8_t mins8_1 = vld1_u8((const uint8_t *) utmp1 + 8);
+            const int16x8_t mins0 = vreinterpretq_s16_u16(vmovl_u8(mins8_0));
+            const int16x8_t mins1 = vreinterpretq_s16_u16(vmovl_u8(mins8_1));
+            const int32x4_t prod0 = vaddq_s32(vmull_s16(vget_low_s16(q8sums), vget_low_s16(mins0)),
+                                              vmull_s16(vget_high_s16(q8sums), vget_high_s16(mins0)));
+            const int32x4_t prod1 = vaddq_s32(vmull_s16(vget_low_s16(q8sums), vget_low_s16(mins1)),
+                                              vmull_s16(vget_high_s16(q8sums), vget_high_s16(mins1)));
+            const int32_t sumi_mins0 = vaddvq_s32(prod0);
+            const int32_t sumi_mins1 = vaddvq_s32(prod1);
+
+            const uint8_t * GGML_RESTRICT q5_0 = x0[i].qs;
+            const uint8_t * GGML_RESTRICT qh_0 = x0[i].qh;
+            const uint8_t * GGML_RESTRICT q5_1 = x1[i].qs;
+            const uint8_t * GGML_RESTRICT qh_1 = x1[i].qh;
+            const int8_t  * GGML_RESTRICT q8 = y0[i].qs;
+
+            ggml_uint8x16x2_t qhbits0 = ggml_vld1q_u8_x2(qh_0);
+            ggml_uint8x16x2_t qhbits1 = ggml_vld1q_u8_x2(qh_1);
+            ggml_uint8x16x4_t q5h0;
+            ggml_uint8x16x4_t q5h1;
+
+            int32_t sumi0 = 0;
+            int32_t sumi1 = 0;
+
+            for (int j = 0; j < QK_K/64; ++j) {
+                const ggml_uint8x16x2_t q5bits0 = ggml_vld1q_u8_x2(q5_0); q5_0 += 32;
+                const ggml_uint8x16x2_t q5bits1 = ggml_vld1q_u8_x2(q5_1); q5_1 += 32;
+                const ggml_int8x16x4_t q8bytes = ggml_vld1q_s8_x4(q8); q8 += 64;
+
+                q5h0.val[0] = vshlq_n_u8(vandq_u8(mone, qhbits0.val[0]), 4);
+                q5h0.val[1] = vshlq_n_u8(vandq_u8(mone, qhbits0.val[1]), 4);
+                q5h0.val[2] = vshlq_n_u8(vandq_u8(mtwo, qhbits0.val[0]), 3);
+                q5h0.val[3] = vshlq_n_u8(vandq_u8(mtwo, qhbits0.val[1]), 3);
+                qhbits0.val[0] = vshrq_n_u8(qhbits0.val[0], 2);
+                qhbits0.val[1] = vshrq_n_u8(qhbits0.val[1], 2);
+
+                q5h1.val[0] = vshlq_n_u8(vandq_u8(mone, qhbits1.val[0]), 4);
+                q5h1.val[1] = vshlq_n_u8(vandq_u8(mone, qhbits1.val[1]), 4);
+                q5h1.val[2] = vshlq_n_u8(vandq_u8(mtwo, qhbits1.val[0]), 3);
+                q5h1.val[3] = vshlq_n_u8(vandq_u8(mtwo, qhbits1.val[1]), 3);
+                qhbits1.val[0] = vshrq_n_u8(qhbits1.val[0], 2);
+                qhbits1.val[1] = vshrq_n_u8(qhbits1.val[1], 2);
+
+                q5bytes.val[0] = vreinterpretq_s8_u8(vorrq_u8(vandq_u8(q5bits0.val[0], m4b), q5h0.val[0]));
+                q5bytes.val[1] = vreinterpretq_s8_u8(vorrq_u8(vandq_u8(q5bits0.val[1], m4b), q5h0.val[1]));
+                q5bytes.val[2] = vreinterpretq_s8_u8(vorrq_u8(vshrq_n_u8(q5bits0.val[0], 4), q5h0.val[2]));
+                q5bytes.val[3] = vreinterpretq_s8_u8(vorrq_u8(vshrq_n_u8(q5bits0.val[1], 4), q5h0.val[3]));
+                sumi0 += vaddvq_s32(ggml_vdotq_s32(ggml_vdotq_s32(mzero, q5bytes.val[0], q8bytes.val[0]), q5bytes.val[1], q8bytes.val[1])) * *scales0++;
+                sumi0 += vaddvq_s32(ggml_vdotq_s32(ggml_vdotq_s32(mzero, q5bytes.val[2], q8bytes.val[2]), q5bytes.val[3], q8bytes.val[3])) * *scales0++;
+
+                q5bytes.val[0] = vreinterpretq_s8_u8(vorrq_u8(vandq_u8(q5bits1.val[0], m4b), q5h1.val[0]));
+                q5bytes.val[1] = vreinterpretq_s8_u8(vorrq_u8(vandq_u8(q5bits1.val[1], m4b), q5h1.val[1]));
+                q5bytes.val[2] = vreinterpretq_s8_u8(vorrq_u8(vshrq_n_u8(q5bits1.val[0], 4), q5h1.val[2]));
+                q5bytes.val[3] = vreinterpretq_s8_u8(vorrq_u8(vshrq_n_u8(q5bits1.val[1], 4), q5h1.val[3]));
+                sumi1 += vaddvq_s32(ggml_vdotq_s32(ggml_vdotq_s32(mzero, q5bytes.val[0], q8bytes.val[0]), q5bytes.val[1], q8bytes.val[1])) * *scales1++;
+                sumi1 += vaddvq_s32(ggml_vdotq_s32(ggml_vdotq_s32(mzero, q5bytes.val[2], q8bytes.val[2]), q5bytes.val[3], q8bytes.val[3])) * *scales1++;
+            }
+
+            sumf0 += y0[i].d * (GGML_CPU_FP16_TO_FP32(x0[i].d) * sumi0 -
+                                GGML_CPU_FP16_TO_FP32(x0[i].dmin) * sumi_mins0);
+            sumf1 += y0[i].d * (GGML_CPU_FP16_TO_FP32(x1[i].d) * sumi1 -
+                                GGML_CPU_FP16_TO_FP32(x1[i].dmin) * sumi_mins1);
+        }
+
+        s[0] = sumf0;
+        s[1] = sumf1;
+        if (bs > 0) {
+            s[bs] = sumf0;
+            s[bs + 1] = sumf1;
+        }
+        return;
+    }
 
     float sumf = 0;
 
@@ -4133,4 +4238,3 @@ void ggml_vec_dot_iq4_xs_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const v
     ggml_vec_dot_iq4_xs_q8_K_generic(n, s, bs, vx, bx, vy, by, nrc);
 #endif
 }
-

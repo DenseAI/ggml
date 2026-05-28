@@ -72,6 +72,18 @@
 #define UNUSED GGML_UNUSED
 #define SWAP(x, y, T) do { T SWAP = x; (x) = y; (y) = SWAP; } while (0)
 
+static inline void ggml_cpu_set_last_node_perf_time_us(struct ggml_tensor * tensor, int64_t value) {
+    memcpy(tensor->padding, &value, sizeof(value));
+}
+
+int64_t ggml_cpu_get_last_node_perf_time_us(const struct ggml_tensor * tensor) {
+    int64_t value = 0;
+    if (tensor) {
+        memcpy(&value, tensor->padding, sizeof(value));
+    }
+    return value;
+}
+
 // precomputed f32 table for f16 (256 KB) (simd-mappings.h)
 float ggml_table_f32_f16[1 << 16];
 
@@ -308,7 +320,7 @@ static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {
         .from_float               = quantize_row_q6_K,
         .vec_dot                  = ggml_vec_dot_q6_K_q8_K,
         .vec_dot_type             = GGML_TYPE_Q8_K,
-#if defined (__ARM_FEATURE_MATMUL_INT8)
+#if defined (__ARM_FEATURE_MATMUL_INT8) || defined (__AVX2__)
         .nrows                    = 2,
 #else
         .nrows                    = 1,
@@ -1549,6 +1561,12 @@ static void ggml_compute_forward_mul_mat_id(
     int64_t * matrix_row_counts = // [n_as]
         incr_ptr_aligned(&wdata_cur, n_as*sizeof(int64_t), sizeof(int64_t));
 
+    int64_t * active_as_count =
+        incr_ptr_aligned(&wdata_cur, sizeof(int64_t), sizeof(int64_t));
+
+    int64_t * active_as = // [n_as]
+        incr_ptr_aligned(&wdata_cur, n_as*sizeof(int64_t), sizeof(int64_t));
+
     struct mmid_row_mapping * matrix_rows = // [n_as][ids->ne[0]*ids->ne[1]]
         incr_ptr_aligned(&wdata_cur, n_as*ids->ne[0]*ids->ne[1]*sizeof(struct mmid_row_mapping), sizeof(int64_t));
 
@@ -1594,6 +1612,32 @@ static void ggml_compute_forward_mul_mat_id(
 #endif
     }
 
+    if (ids->ne[1] == 1 && ne12 == 1 && ne13 == 1 && n_ids % ne11 == 0) {
+        ggml_barrier(params->threadpool);
+
+        const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
+        const size_t row_size = ggml_row_size(vec_dot_type, ne10);
+        ggml_vec_dot_t const vec_dot = type_traits_cpu[type].vec_dot;
+
+        const int64_t ir0_start = (ith * ne01) / nth;
+        const int64_t ir0_end = ((ith + 1) * ne01) / nth;
+
+        for (int id = 0; id < n_ids; ++id) {
+            const int32_t cur_a = *(const int32_t *) ((const char *) ids->data + id*ids->nb[0]);
+            assert(cur_a >= 0 && cur_a < n_as);
+
+            const char * src0_cur = (const char *) src0->data + cur_a*nb02;
+            const char * src1_col = (const char *) wdata +
+                ((src1_cont || src1->type != vec_dot_type) ? (id % ne11)*row_size : (id % ne11)*nb11);
+            float * dst_col = (float *) ((char *) dst->data + id*nb1);
+
+            for (int64_t ir0 = ir0_start; ir0 < ir0_end; ++ir0) {
+                vec_dot(ne00, &dst_col[ir0], 0, src0_cur + ir0*nb01, 0, src1_col, 0, 1);
+            }
+        }
+        return;
+    }
+
     if (ith == 0) {
         // initialize matrix_row_counts
         memset(matrix_row_counts, 0, n_as*sizeof(int64_t));
@@ -1609,17 +1653,29 @@ static void ggml_compute_forward_mul_mat_id(
                 matrix_row_counts[i02] += 1;
             }
         }
+
+        int64_t n_active = 0;
+        for (int cur_a = 0; cur_a < n_as; ++cur_a) {
+            if (matrix_row_counts[cur_a] != 0) {
+                active_as[n_active++] = cur_a;
+            }
+        }
+        *active_as_count = n_active;
     }
 
+    ggml_barrier(params->threadpool);
+
     // reset current_chunk
-    for (int cur_a = ith; cur_a < n_as; cur_a += nth) {
+    for (int64_t ia = ith; ia < *active_as_count; ia += nth) {
+        const int cur_a = active_as[ia];
         atomic_int * current_chunk_ctr = (atomic_int *)(atomic_current_chunk + cur_a);
         *current_chunk_ctr = nth;
     }
 
     ggml_barrier(params->threadpool);
 
-    for (int cur_a = 0; cur_a < n_as; ++cur_a) {
+    for (int64_t ia = 0; ia < *active_as_count; ++ia) {
+        const int cur_a = active_as[ia];
         const int64_t cne1 = matrix_row_counts[cur_a];
 
         if (cne1 == 0) {
@@ -1688,6 +1744,20 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
 
     if (tensor->op == GGML_OP_NONE || ggml_is_empty(tensor)) {
         return;
+    }
+
+    if (getenv("DENSECORE_DEBUG_GGML_EXEC")) {
+        fprintf(stderr,
+                "[GGMLExec] op=%s name=%s type=%d ne=[%lld,%lld,%lld,%lld] src0=%s src1=%s src2=%s\n",
+                ggml_op_name(tensor->op),
+                tensor->name[0] ? tensor->name : "<unnamed>",
+                (int) tensor->type,
+                (long long) tensor->ne[0], (long long) tensor->ne[1],
+                (long long) tensor->ne[2], (long long) tensor->ne[3],
+                tensor->src[0] && tensor->src[0]->name[0] ? tensor->src[0]->name : (tensor->src[0] ? "<unnamed>" : "<null>"),
+                tensor->src[1] && tensor->src[1]->name[0] ? tensor->src[1]->name : (tensor->src[1] ? "<unnamed>" : "<null>"),
+                tensor->src[2] && tensor->src[2]->name[0] ? tensor->src[2]->name : (tensor->src[2] ? "<unnamed>" : "<null>"));
+        fflush(stderr);
     }
 
     // extra_buffer op?
@@ -2813,6 +2883,9 @@ struct ggml_cplan ggml_graph_plan(
                         }
                         // matrix_row_counts
                         cur += n_as * sizeof(int64_t) + sizeof(int64_t);
+                        // active_as_count + active_as
+                        cur += sizeof(int64_t) + sizeof(int64_t);
+                        cur += n_as * sizeof(int64_t) + sizeof(int64_t);
                         // matrix_rows
                         cur += n_as*ids->ne[0]*ids->ne[1]*sizeof(struct mmid_row_mapping) + sizeof(int64_t);
                         // atomic_current_chunk
@@ -2981,6 +3054,19 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             continue;
         }
 
+        if (state->ith == 0) {
+            const char * trace_env = getenv("DENSECORE_DEBUG_GGML_EXEC_TRACE");
+            if (trace_env && trace_env[0] != '\0' && strcmp(trace_env, "0") != 0) {
+                fprintf(stderr, "[GGML_EXEC_TRACE] node=%d op=%s name=%s\n", node_n, ggml_op_name(node->op),
+                        node->name[0] ? node->name : "<unnamed>");
+            }
+        }
+
+        const int64_t node_start_us = state->ith == 0 ? ggml_time_us() : 0;
+        if (state->ith == 0) {
+            ggml_cpu_set_last_node_perf_time_us(node, 0);
+        }
+
         ggml_compute_forward(&params, node);
 
         if (state->ith == 0 && cplan->abort_callback &&
@@ -2991,6 +3077,10 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         if (node_n + 1 < cgraph->n_nodes) {
             ggml_barrier(state->threadpool);
+        }
+
+        if (state->ith == 0) {
+            ggml_cpu_set_last_node_perf_time_us(node, ggml_time_us() - node_start_us);
         }
     }
 

@@ -3256,6 +3256,51 @@ static int repack_q4_K_to_q4_K_8_bl(struct ggml_tensor * t, int interleave_block
     GGML_UNUSED(data_size);
 }
 
+static int repack_q8_0_to_q8_0_4_bl(struct ggml_tensor * t, int interleave_block,
+                                    const void * GGML_RESTRICT data, size_t data_size);
+
+int ggml_repack_q4_K_8x8(const void * GGML_RESTRICT data, size_t data_size, int64_t rows, int64_t cols,
+                         void * GGML_RESTRICT dst, size_t dst_size) {
+    if (data == nullptr || dst == nullptr || rows <= 0 || cols <= 0 || rows % 8 != 0 || cols % QK_K != 0) {
+        return -1;
+    }
+    const size_t expected_src_size = (size_t) rows * (size_t) (cols / QK_K) * sizeof(block_q4_K);
+    const size_t expected_dst_size = (size_t) (rows / 8) * (size_t) (cols / QK_K) * sizeof(block_q4_Kx8);
+    if (data_size < expected_src_size || dst_size < expected_dst_size) {
+        return -1;
+    }
+
+    struct ggml_tensor t = {};
+    t.type = GGML_TYPE_Q4_K;
+    t.ne[0] = cols;
+    t.ne[1] = rows;
+    t.ne[2] = 1;
+    t.ne[3] = 1;
+    t.data = dst;
+    return repack_q4_K_to_q4_K_8_bl(&t, 8, data, expected_src_size);
+}
+
+int ggml_repack_q8_0_4x8(const void * GGML_RESTRICT data, size_t data_size, int64_t rows, int64_t cols,
+                         void * GGML_RESTRICT dst, size_t dst_size) {
+    if (data == nullptr || dst == nullptr || rows <= 0 || cols <= 0 || rows % 4 != 0 || cols % QK8_0 != 0) {
+        return -1;
+    }
+    const size_t expected_src_size = (size_t) rows * (size_t) (cols / QK8_0) * sizeof(block_q8_0);
+    const size_t expected_dst_size = (size_t) (rows / 4) * (size_t) (cols / QK8_0) * sizeof(block_q8_0x4);
+    if (data_size < expected_src_size || dst_size < expected_dst_size) {
+        return -1;
+    }
+
+    struct ggml_tensor t = {};
+    t.type = GGML_TYPE_Q8_0;
+    t.ne[0] = cols;
+    t.ne[1] = rows;
+    t.ne[2] = 1;
+    t.ne[3] = 1;
+    t.data = dst;
+    return repack_q8_0_to_q8_0_4_bl(&t, 8, data, expected_src_size);
+}
+
 static int repack_q4_K_to_q4_K_16_bl(struct ggml_tensor * t, int interleave_block, const void * GGML_RESTRICT data, size_t data_size) {
     GGML_ASSERT(t->type == GGML_TYPE_Q4_K);
     constexpr int nrows_interleaved = 16;
@@ -3414,6 +3459,27 @@ static int repack_q5_K_to_q5_K_8_bl(struct ggml_tensor *       t,
     return 0;
 }
 
+int ggml_repack_q5_K_8x8(const void * GGML_RESTRICT data, size_t data_size, int64_t rows, int64_t cols,
+                         void * GGML_RESTRICT dst, size_t dst_size) {
+    if (data == nullptr || dst == nullptr || rows <= 0 || cols <= 0 || rows % 8 != 0 || cols % QK_K != 0) {
+        return -1;
+    }
+    const size_t expected_src_size = (size_t) rows * (size_t) (cols / QK_K) * sizeof(block_q5_K);
+    const size_t expected_dst_size = (size_t) (rows / 8) * (size_t) (cols / QK_K) * sizeof(block_q5_Kx8);
+    if (data_size < expected_src_size || dst_size < expected_dst_size) {
+        return -1;
+    }
+
+    struct ggml_tensor t = {};
+    t.type = GGML_TYPE_Q5_K;
+    t.ne[0] = cols;
+    t.ne[1] = rows;
+    t.ne[2] = 1;
+    t.ne[3] = 1;
+    t.data = dst;
+    return repack_q5_K_to_q5_K_8_bl(&t, 8, data, expected_src_size);
+}
+
 static int repack_q6_K_to_q6_K_8_bl(struct ggml_tensor * t, int interleave_block, const void * GGML_RESTRICT data, size_t data_size) {
     GGML_ASSERT(t->type == GGML_TYPE_Q6_K);
     GGML_ASSERT(interleave_block == 4 || interleave_block == 8);
@@ -3441,6 +3507,27 @@ static int repack_q6_K_to_q6_K_8_bl(struct ggml_tensor * t, int interleave_block
         src += nrows_interleaved * nblocks;
     }
     return 0;
+}
+
+int ggml_repack_q6_K_8x8(const void * GGML_RESTRICT data, size_t data_size, int64_t rows, int64_t cols,
+                         void * GGML_RESTRICT dst, size_t dst_size) {
+    if (data == nullptr || dst == nullptr || rows <= 0 || cols <= 0 || rows % 8 != 0 || cols % QK_K != 0) {
+        return -1;
+    }
+    const size_t expected_src_size = (size_t) rows * (size_t) (cols / QK_K) * sizeof(block_q6_K);
+    const size_t expected_dst_size = (size_t) (rows / 8) * (size_t) (cols / QK_K) * sizeof(block_q6_Kx8);
+    if (data_size < expected_src_size || dst_size < expected_dst_size) {
+        return -1;
+    }
+
+    struct ggml_tensor t = {};
+    t.type = GGML_TYPE_Q6_K;
+    t.ne[0] = cols;
+    t.ne[1] = rows;
+    t.ne[2] = 1;
+    t.ne[3] = 1;
+    t.data = dst;
+    return repack_q6_K_to_q6_K_8_bl(&t, 8, data, expected_src_size);
 }
 
 static int repack_q4_0_to_q4_0_8_bl(struct ggml_tensor * t, int interleave_block, const void * GGML_RESTRICT data, size_t data_size) {
@@ -4443,6 +4530,36 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             }
         }
 
+        if (ids->ne[1] == 1 && ne12 == 1 && ne13 == 1 && n_ids % ne11 == 0) {
+            ggml_barrier(params->threadpool);
+
+            int64_t src0_cur_start = (ith * ne01) / nth;
+            int64_t src0_cur_end   = ((ith + 1) * ne01) / nth;
+
+            src0_cur_start = (src0_cur_start % NB_COLS) ? src0_cur_start + NB_COLS - (src0_cur_start % NB_COLS) : src0_cur_start;
+            src0_cur_end   = (src0_cur_end   % NB_COLS) ? src0_cur_end   + NB_COLS - (src0_cur_end   % NB_COLS) : src0_cur_end;
+            if (src0_cur_end > ne01) {
+                src0_cur_end = ne01;
+            }
+            if (src0_cur_start >= src0_cur_end) {
+                return;
+            }
+
+            for (int id = 0; id < n_ids; ++id) {
+                const int32_t cur_a =
+                    *(const int32_t *) ((const char *) ids->data + id * ids->nb[0]);
+                GGML_ASSERT(cur_a >= 0 && cur_a < n_as);
+
+                const char * src0_cur = (const char *) src0->data + cur_a * nb02;
+                const char * src1_col = (const char *) wdata + (id % ne11) * nbw1;
+
+                gemv<BLOC_TYPE, INTER_SIZE, NB_COLS, PARAM_TYPE>(
+                    ne00, (float *) ((char *) dst->data + id * nb1) + src0_cur_start, ne01,
+                    src0_cur + src0_cur_start * nb01, src1_col, 1, src0_cur_end - src0_cur_start);
+            }
+            return;
+        }
+
 #define MMID_MATRIX_ROW(row_id, i1) matrix_rows[(row_id) * ne12 + (i1)]
 
         if (ith == 0) {
@@ -4602,7 +4719,7 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
         }
         if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
             if (cur->ne[1] % 8 == 0) {
-                return &q4_K_8x8_q8_K;
+                return &q4_K_8x4_q8_K;
             }
         }
         if (ggml_cpu_has_neon() && ggml_cpu_has_dotprod()) {

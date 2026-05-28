@@ -1472,17 +1472,6 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_GET_ROWS) {
             if (op->src[0]->buffer && op->src[0]->buffer->buft == ggml_backend_cpu_kleidiai_buffer_type()) {
                 return (ggml::cpu::tensor_traits *) op->src[0]->extra;
-            } else {
-                std::array<ggml_kleidiai_kernels *, GGML_KLEIDIAI_MAX_KERNEL_SLOTS> kernel_chain;
-                const int slot_total = kleidiai_collect_kernel_chain(op, kernel_chain);
-                const bool has_kernel = slot_total > 0;
-                if (has_kernel && op->src[1]->ne[1] > 1) {
-                    if ((op->src[0]->nb[1] * op->src[0]->ne[1] != op->src[0]->nb[2]) ||
-                        (op->src[1]->nb[1] * op->src[1]->ne[1] != op->src[1]->nb[2])) {
-                        return nullptr;
-                    }
-                    return ggml::cpu::kleidiai::get_tensor_traits(NULL, NULL);
-                }
             }
         }
         return nullptr;

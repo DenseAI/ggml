@@ -153,6 +153,9 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         if (!src0->buffer || src0->buffer->buft != ggml_backend_amx_buffer_type()) {
             return false;
         }
+        if (ggml_n_dims(src0) != 2) {
+            return false;
+        }
         if (src1->buffer && !ggml_backend_buft_is_host(src1->buffer->buft)) {
             return false;
         }

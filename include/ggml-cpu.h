@@ -73,6 +73,10 @@ extern "C" {
     // note: the drawback of this API is that you must have ensured that the context has enough memory for the work data
     GGML_BACKEND_API enum ggml_status  ggml_graph_compute_with_ctx(struct ggml_context * ctx, struct ggml_cgraph * cgraph, int n_threads);
 
+    // Last wall-clock execution time recorded by the CPU graph executor for a tensor node.
+    // Returns 0 when the node has not been executed by the CPU backend.
+    GGML_BACKEND_API int64_t ggml_cpu_get_last_node_perf_time_us(const struct ggml_tensor * tensor);
+
     //
     // system info
     //
@@ -121,6 +125,36 @@ extern "C" {
     };
 
     GGML_BACKEND_API const struct ggml_type_traits_cpu * ggml_get_type_traits_cpu(enum ggml_type type);
+
+    GGML_BACKEND_API void ggml_gemv_q4_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+                                                   const void * GGML_RESTRICT vx,
+                                                   const void * GGML_RESTRICT vy, int nr, int nc);
+    GGML_BACKEND_API void ggml_gemv_q5_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+                                                   const void * GGML_RESTRICT vx,
+                                                   const void * GGML_RESTRICT vy, int nr, int nc);
+    GGML_BACKEND_API void ggml_gemv_q6_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+                                                   const void * GGML_RESTRICT vx,
+                                                   const void * GGML_RESTRICT vy, int nr, int nc);
+    GGML_BACKEND_API void ggml_gemv_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs,
+                                                   const void * GGML_RESTRICT vx,
+                                                   const void * GGML_RESTRICT vy, int nr, int nc);
+    GGML_BACKEND_API void ggml_quantize_mat_q8_K_4x8(const float * GGML_RESTRICT x,
+                                                      void * GGML_RESTRICT vy, int64_t k);
+    GGML_BACKEND_API void ggml_gemm_q4_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+                                                   const void * GGML_RESTRICT vx,
+                                                   const void * GGML_RESTRICT vy, int nr, int nc);
+    GGML_BACKEND_API int ggml_repack_q4_K_8x8(const void * GGML_RESTRICT data, size_t data_size,
+                                               int64_t rows, int64_t cols, void * GGML_RESTRICT dst,
+                                               size_t dst_size);
+    GGML_BACKEND_API int ggml_repack_q5_K_8x8(const void * GGML_RESTRICT data, size_t data_size,
+                                               int64_t rows, int64_t cols, void * GGML_RESTRICT dst,
+                                               size_t dst_size);
+    GGML_BACKEND_API int ggml_repack_q6_K_8x8(const void * GGML_RESTRICT data, size_t data_size,
+                                               int64_t rows, int64_t cols, void * GGML_RESTRICT dst,
+                                               size_t dst_size);
+    GGML_BACKEND_API int ggml_repack_q8_0_4x8(const void * GGML_RESTRICT data, size_t data_size,
+                                               int64_t rows, int64_t cols, void * GGML_RESTRICT dst,
+                                               size_t dst_size);
 
     GGML_BACKEND_API void ggml_cpu_init(void);
 
