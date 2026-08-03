@@ -202,13 +202,12 @@ struct tile_config_t{
 //
 
 inline void ggml_tile_config_init(void) {
-    static thread_local bool done = false;
-
-    if (done) {
-        return;
+    if (!ggml_backend_amx_request_thread_permission()) {
+        GGML_ABORT("AMX XTILEDATA permission is unavailable on the compute thread");
     }
 
-    alignas(64) tile_config_t tc = {};
+    // GCC LTO can otherwise delete the shape stores before _tile_loadconfig.
+    alignas(64) volatile tile_config_t tc = {};
     tc.palette_id = 1;
     tc.start_row = 0;
     tc.rows[0] = 8;   tc.colsb[0] = 64;
@@ -220,8 +219,7 @@ inline void ggml_tile_config_init(void) {
     tc.rows[6] = 16;  tc.colsb[6] = 64;
     tc.rows[7] = 16;  tc.colsb[7] = 64;
 
-    _tile_loadconfig(&tc);
-    done = true;
+    _tile_loadconfig(const_cast<const tile_config_t *>(&tc));
 }
 
 // we need an extra 16 * 4B (TILE_N * int32_t) for each NB/KB block for compensation.

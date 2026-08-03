@@ -212,12 +212,16 @@ static size_t ggml_backend_amx_buffer_type_get_alloc_size(ggml_backend_buffer_ty
 #define XFEATURE_XTILECFG       17
 #define XFEATURE_XTILEDATA      18
 
-static bool ggml_amx_init() {
+bool ggml_backend_amx_request_thread_permission() {
 #if defined(__linux__)
+    static thread_local bool permission_granted = false;
+    if (permission_granted) {
+        return true;
+    }
     if (syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA)) {
-        fprintf(stderr, "AMX is not ready to be used!\n");
         return false;
     }
+    permission_granted = true;
     return true;
 #elif defined(_WIN32)
     return true;
@@ -240,7 +244,8 @@ ggml_backend_buffer_type_t ggml_backend_amx_buffer_type() {
         /* .context = */ new ggml::cpu::amx::extra_buffer_type(),
     };
 
-    if (!ggml_amx_init()) {
+    if (!ggml_backend_amx_request_thread_permission()) {
+        fprintf(stderr, "AMX is not ready to be used!\n");
         return nullptr;
     }
 
